@@ -669,9 +669,9 @@ export async function getConversations(
         page = await readPage(1, "id,updated_time");
         unavailable = true;
         console.warn("[Conversations] Detail expansion unavailable", {
-          code: error.code,
-          subcode: error.subcode,
-          trace: error.fbTraceId,
+          code: error instanceof MetaApiError ? error.code : error.name,
+          subcode: error instanceof MetaApiError ? error.subcode : undefined,
+          trace: error instanceof MetaApiError ? error.fbTraceId : undefined,
         });
         break;
       }
