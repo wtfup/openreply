@@ -10,13 +10,46 @@ function instagramGraphBase() {
     ? `https://graph.facebook.com/${getMetaGraphApiVersion()}`
     : `https://graph.instagram.com/${getMetaGraphApiVersion()}`;
 }
-// On graph.facebook.com "/me" is the Page, not the Instagram account; callers pass the account id.
-// Instagram Messaging through graph.facebook.com is addressed from the Page node (META_PAGE_ID), not the IG user node.
-function messagingNode(instagramAccountId: string) {
-  return useFacebookGraph() && process.env.META_PAGE_ID ? process.env.META_PAGE_ID : instagramAccountId;
+// On graph.facebook.com "/me" is the Page, not the Instagram account, and Instagram Messaging is addressed
+// from the Page node. Both ids are resolved from the token itself (a Page token answers /me?fields=id,
+// instagram_business_account), so every connected account routes through its own Page. META_PAGE_ID /
+// META_IG_ACCOUNT_ID remain as a fallback for a single-account install.
+type PageNodes = { pageId: string; igId: string };
+const nodeCache = new Map<string, Promise<PageNodes>>();
+async function resolveNodes(accessToken: string): Promise<PageNodes> {
+  const key = accessToken.slice(-24);
+  let pending = nodeCache.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const url = new URL(`${facebookGraphBase()}/me`);
+      url.searchParams.set("fields", "id,instagram_business_account");
+      url.searchParams.set("access_token", accessToken);
+      const data = await handleResponse<{ id: string; instagram_business_account?: { id: string } }>(
+        await fetch(url.toString())
+      );
+      const igId = data.instagram_business_account?.id ?? process.env.META_IG_ACCOUNT_ID ?? "me";
+      return { pageId: data.id, igId };
+    })();
+    nodeCache.set(key, pending);
+    pending.catch(() => nodeCache.delete(key));
+  }
+  return pending;
 }
-function selfPath() {
-  return useFacebookGraph() && process.env.META_IG_ACCOUNT_ID ? process.env.META_IG_ACCOUNT_ID : "me";
+async function messagingNode(accessToken: string, instagramAccountId: string): Promise<string> {
+  if (!useFacebookGraph()) return instagramAccountId;
+  try {
+    return (await resolveNodes(accessToken)).pageId;
+  } catch {
+    return process.env.META_PAGE_ID ?? instagramAccountId;
+  }
+}
+async function selfPath(accessToken: string): Promise<string> {
+  if (!useFacebookGraph()) return "me";
+  try {
+    return (await resolveNodes(accessToken)).igId;
+  } catch {
+    return process.env.META_IG_ACCOUNT_ID ?? "me";
+  }
 }
 
 function facebookGraphBase() {
@@ -183,7 +216,7 @@ export async function sendPrivateReply(
   message: string
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
-    `${instagramGraphBase()}/${messagingNode(instagramAccountId)}/messages`,
+    `${instagramGraphBase()}/${await messagingNode(accessToken, instagramAccountId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -215,7 +248,7 @@ export async function sendPrivateReplyWithButton(
   payload: string
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
-    `${instagramGraphBase()}/${messagingNode(instagramAccountId)}/messages`,
+    `${instagramGraphBase()}/${await messagingNode(accessToken, instagramAccountId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -258,7 +291,7 @@ export async function sendDirectMessageWithButton(
   payload: string
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
-    `${instagramGraphBase()}/${messagingNode(instagramAccountId)}/messages`,
+    `${instagramGraphBase()}/${await messagingNode(accessToken, instagramAccountId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -374,7 +407,7 @@ export async function sendPrivateReplyWithLinkButton(
   buttons: LinkButton[]
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
-    `${instagramGraphBase()}/${messagingNode(instagramAccountId)}/messages`,
+    `${instagramGraphBase()}/${await messagingNode(accessToken, instagramAccountId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -411,7 +444,7 @@ export async function sendDirectMessage(
   message: string
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
-    `${instagramGraphBase()}/${messagingNode(instagramAccountId)}/messages`,
+    `${instagramGraphBase()}/${await messagingNode(accessToken, instagramAccountId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -440,7 +473,7 @@ export async function sendDirectMessageWithLinkButton(
   buttons: LinkButton[]
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
-    `${instagramGraphBase()}/${messagingNode(instagramAccountId)}/messages`,
+    `${instagramGraphBase()}/${await messagingNode(accessToken, instagramAccountId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -598,7 +631,7 @@ export async function getConversations(
   async function readPage(limit: number, requestedFields: string): Promise<Page> {
     // Never follow Meta's next URL: rebuild on our trusted host and carry the
     // token separately. A messages.paging cursor must never advance this list.
-    const url = new URL(`${instagramGraphBase()}/${messagingNode(igUserId)}/conversations`);
+    const url = new URL(`${instagramGraphBase()}/${await messagingNode(accessToken, igUserId)}/conversations`);
     url.searchParams.set("platform", "instagram");
     url.searchParams.set("fields", requestedFields);
     url.searchParams.set("limit", String(limit));
@@ -680,7 +713,7 @@ export async function getConversationMessages(
 }
 
 export async function getUserInfo(accessToken: string): Promise<InstagramUser> {
-  const url = new URL(`${instagramGraphBase()}/${selfPath()}`);
+  const url = new URL(`${instagramGraphBase()}/${await selfPath(accessToken)}`);
   url.searchParams.set(
     "fields",
     useFacebookGraph() ? "id,username,name,profile_picture_url,followers_count" : "id,user_id,username,name,profile_picture_url,followers_count"
@@ -701,7 +734,7 @@ export async function getUserMedia(
   accessToken: string,
   limit = 25
 ): Promise<InstagramMedia[]> {
-  const url = new URL(`${instagramGraphBase()}/${selfPath()}/media`);
+  const url = new URL(`${instagramGraphBase()}/${await selfPath(accessToken)}/media`);
   url.searchParams.set("fields", MEDIA_FIELDS);
   url.searchParams.set("limit", limit.toString());
   url.searchParams.set("access_token", accessToken);
@@ -723,7 +756,7 @@ export async function getAllUserMedia(
 ): Promise<InstagramMedia[]> {
   const results: InstagramMedia[] = [];
 
-  const first = new URL(`${instagramGraphBase()}/${selfPath()}/media`);
+  const first = new URL(`${instagramGraphBase()}/${await selfPath(accessToken)}/media`);
   first.searchParams.set("fields", MEDIA_FIELDS);
   first.searchParams.set("limit", String(Math.min(MEDIA_PAGE_SIZE, max)));
   first.searchParams.set("access_token", accessToken);
