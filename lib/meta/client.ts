@@ -1,7 +1,18 @@
 import { getMetaGraphApiVersion, requireEnv } from "@/lib/env";
 
+// WTF patch: META_GRAPH_HOST=facebook routes every call through graph.facebook.com so a Page-backed
+// Instagram professional account can run on a Page/system-user token (no Instagram Login needed).
+function useFacebookGraph() {
+  return (process.env.META_GRAPH_HOST ?? "instagram").toLowerCase() === "facebook";
+}
 function instagramGraphBase() {
-  return `https://graph.instagram.com/${getMetaGraphApiVersion()}`;
+  return useFacebookGraph()
+    ? `https://graph.facebook.com/${getMetaGraphApiVersion()}`
+    : `https://graph.instagram.com/${getMetaGraphApiVersion()}`;
+}
+// On graph.facebook.com "/me" is the Page, not the Instagram account; callers pass the account id.
+function selfPath() {
+  return useFacebookGraph() && process.env.META_IG_ACCOUNT_ID ? process.env.META_IG_ACCOUNT_ID : "me";
 }
 
 function facebookGraphBase() {
@@ -665,10 +676,10 @@ export async function getConversationMessages(
 }
 
 export async function getUserInfo(accessToken: string): Promise<InstagramUser> {
-  const url = new URL(`${instagramGraphBase()}/me`);
+  const url = new URL(`${instagramGraphBase()}/${selfPath()}`);
   url.searchParams.set(
     "fields",
-    "id,user_id,username,name,profile_picture_url,followers_count"
+    useFacebookGraph() ? "id,username,name,profile_picture_url,followers_count" : "id,user_id,username,name,profile_picture_url,followers_count"
   );
   url.searchParams.set("access_token", accessToken);
 
@@ -686,7 +697,7 @@ export async function getUserMedia(
   accessToken: string,
   limit = 25
 ): Promise<InstagramMedia[]> {
-  const url = new URL(`${instagramGraphBase()}/me/media`);
+  const url = new URL(`${instagramGraphBase()}/${selfPath()}/media`);
   url.searchParams.set("fields", MEDIA_FIELDS);
   url.searchParams.set("limit", limit.toString());
   url.searchParams.set("access_token", accessToken);
@@ -708,7 +719,7 @@ export async function getAllUserMedia(
 ): Promise<InstagramMedia[]> {
   const results: InstagramMedia[] = [];
 
-  const first = new URL(`${instagramGraphBase()}/me/media`);
+  const first = new URL(`${instagramGraphBase()}/${selfPath()}/media`);
   first.searchParams.set("fields", MEDIA_FIELDS);
   first.searchParams.set("limit", String(Math.min(MEDIA_PAGE_SIZE, max)));
   first.searchParams.set("access_token", accessToken);
