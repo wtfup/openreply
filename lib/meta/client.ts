@@ -11,6 +11,10 @@ function instagramGraphBase() {
     : `https://graph.instagram.com/${getMetaGraphApiVersion()}`;
 }
 // On graph.facebook.com "/me" is the Page, not the Instagram account; callers pass the account id.
+// Instagram Messaging through graph.facebook.com is addressed from the Page node (META_PAGE_ID), not the IG user node.
+function messagingNode(instagramAccountId: string) {
+  return useFacebookGraph() && process.env.META_PAGE_ID ? process.env.META_PAGE_ID : instagramAccountId;
+}
 function selfPath() {
   return useFacebookGraph() && process.env.META_IG_ACCOUNT_ID ? process.env.META_IG_ACCOUNT_ID : "me";
 }
@@ -179,7 +183,7 @@ export async function sendPrivateReply(
   message: string
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
-    `${instagramGraphBase()}/${instagramAccountId}/messages`,
+    `${instagramGraphBase()}/${messagingNode(instagramAccountId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -211,7 +215,7 @@ export async function sendPrivateReplyWithButton(
   payload: string
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
-    `${instagramGraphBase()}/${instagramAccountId}/messages`,
+    `${instagramGraphBase()}/${messagingNode(instagramAccountId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -254,7 +258,7 @@ export async function sendDirectMessageWithButton(
   payload: string
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
-    `${instagramGraphBase()}/${instagramAccountId}/messages`,
+    `${instagramGraphBase()}/${messagingNode(instagramAccountId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -370,7 +374,7 @@ export async function sendPrivateReplyWithLinkButton(
   buttons: LinkButton[]
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
-    `${instagramGraphBase()}/${instagramAccountId}/messages`,
+    `${instagramGraphBase()}/${messagingNode(instagramAccountId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -407,7 +411,7 @@ export async function sendDirectMessage(
   message: string
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
-    `${instagramGraphBase()}/${instagramAccountId}/messages`,
+    `${instagramGraphBase()}/${messagingNode(instagramAccountId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -436,7 +440,7 @@ export async function sendDirectMessageWithLinkButton(
   buttons: LinkButton[]
 ): Promise<{ recipient_id: string; message_id: string }> {
   const response = await fetch(
-    `${instagramGraphBase()}/${instagramAccountId}/messages`,
+    `${instagramGraphBase()}/${messagingNode(instagramAccountId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -594,7 +598,7 @@ export async function getConversations(
   async function readPage(limit: number, requestedFields: string): Promise<Page> {
     // Never follow Meta's next URL: rebuild on our trusted host and carry the
     // token separately. A messages.paging cursor must never advance this list.
-    const url = new URL(`${instagramGraphBase()}/${igUserId}/conversations`);
+    const url = new URL(`${instagramGraphBase()}/${messagingNode(igUserId)}/conversations`);
     url.searchParams.set("platform", "instagram");
     url.searchParams.set("fields", requestedFields);
     url.searchParams.set("limit", String(limit));
