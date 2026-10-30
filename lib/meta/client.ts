@@ -612,6 +612,8 @@ export interface InstagramConversation {
  * Healthy accounts still need just one request. Auth, permission, rate-limit,
  * transport and minimal-list failures remain visible rather than looking empty.
  */
+const CONVERSATIONS_PAGE_TIMEOUT_MS = 30_000;
+
 export async function getConversations(
   accessToken: string,
   igUserId: string
@@ -639,7 +641,9 @@ export async function getConversations(
     return handleResponse<Page>(
       await fetch(url.toString(), {
         headers: { Authorization: `Bearer ${accessToken}` },
-        signal: AbortSignal.timeout(10_000),
+        // A 50-row page with message previews takes ~13 s on a busy inbox
+        // (measured on @wtfgyms, 30-10-2026); 10 s produced a hard failure.
+        signal: AbortSignal.timeout(CONVERSATIONS_PAGE_TIMEOUT_MS),
       })
     );
   }
@@ -654,7 +658,8 @@ export async function getConversations(
         page = await readPage(limit, fields);
         break;
       } catch (error) {
-        if (!(error instanceof MetaApiError) || error.code !== 1) throw error;
+        const timedOut = error instanceof Error && error.name === "TimeoutError";
+        if (!timedOut && (!(error instanceof MetaApiError) || error.code !== 1)) throw error;
         if (limit > 1) {
           limit = Math.max(1, Math.floor(limit / 2));
           continue;
